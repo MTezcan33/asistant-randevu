@@ -24,10 +24,12 @@ import {
   ArrowLeft
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
+import { supabase } from '@/lib/supabase';
 
 const OnboardingPage = () => {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState('basic');
+  const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     // Basic Info
     sector: '',
@@ -143,25 +145,94 @@ const OnboardingPage = () => {
     });
   };
 
-  const handleSubmit = () => {
-    // Save to localStorage
-    const companyData = {
-      ...formData,
-      id: Date.now(),
-      createdAt: new Date().toISOString(),
-      status: 'active'
-    };
+  const handleSubmit = async () => {
+    setIsLoading(true);
 
-    localStorage.setItem('company', JSON.stringify(companyData));
-    
-    toast({
-      title: "Tebrikler! 🎉",
-      description: "Firma profiliniz başarıyla oluşturuldu. Dashboard'a yönlendiriliyorsunuz."
-    });
+    try {
+      // 1. Firmayı Supabase'e kaydet
+      const { data: companyData, error: companyError } = await supabase
+        .from('companies')
+        .insert([{
+          name: formData.companyName,
+          email: formData.email || null,
+          phone: formData.phone || null,
+          phone_verified: false,
+          address: formData.address || null,
+          services: formData.services, // JSONB
+          working_hours: formData.workingDays, // JSONB
+          plan_type: 'trial'
+        }])
+        .select()
+        .single();
 
-    setTimeout(() => {
-      navigate('/dashboard');
-    }, 2000);
+      if (companyError) {
+        console.error('Supabase Company Error:', companyError);
+        toast({
+          title: "Hata!",
+          description: `Firma kaydedilemedi: ${companyError.message}`,
+          variant: "destructive"
+        });
+        setIsLoading(false);
+        return;
+      }
+
+      console.log('Company created:', companyData);
+
+      // 2. Hizmetleri kaydet
+      const validServices = formData.services.filter(s => s.name && s.duration);
+      
+      if (validServices.length > 0) {
+        const servicesData = validServices.map(service => ({
+          company_id: companyData.id,
+          name: service.name,
+          price: service.price ? parseFloat(service.price) : null,
+          duration_minutes: parseInt(service.duration) || 30,
+          description: service.description || null,
+          is_active: true,
+          currency: 'GBP'
+        }));
+
+        const { error: servicesError } = await supabase
+          .from('company_services')
+          .insert(servicesData);
+
+        if (servicesError) {
+          console.error('Services Error:', servicesError);
+          // Hizmetler kaydedilemese bile devam et
+        } else {
+          console.log('Services created successfully');
+        }
+      }
+
+      // 3. localStorage'a kaydet (yerel kullanım için)
+      const completeCompanyData = {
+        ...companyData,
+        sector: formData.sector,
+        whatsappNumber: formData.whatsappNumber,
+        createdAt: new Date().toISOString(),
+        status: 'active'
+      };
+      localStorage.setItem('company', JSON.stringify(completeCompanyData));
+      
+      toast({
+        title: "Tebrikler! 🎉",
+        description: "Firma profiliniz başarıyla oluşturuldu. Dashboard'a yönlendiriliyorsunuz."
+      });
+
+      setTimeout(() => {
+        navigate('/dashboard');
+      }, 2000);
+
+    } catch (error) {
+      console.error('Error:', error);
+      toast({
+        title: "Hata!",
+        description: "Bir hata oluştu, lütfen tekrar deneyin.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const isStepComplete = (step) => {
@@ -529,7 +600,7 @@ const OnboardingPage = () => {
                       </p>
                       <Button 
                         variant="outline" 
-                        onClick={() => toast({ title: "🚧 Tatil takvimi henüz hazır değil—ama merak etmeyin! Bir sonraki istekte talep edebilirsiniz! 🚀" })}
+                        onClick={() => toast({ title: "🚧 Tatil takvimi henüz hazır değil—ama merak etmeyin! Bir sonraki istekte talep edebilirsiniz!" })}
                         className="text-blue-600 border-blue-200"
                       >
                         <Calendar className="w-4 h-4 mr-2" />
@@ -547,10 +618,10 @@ const OnboardingPage = () => {
                       </Button>
                       <Button 
                         onClick={handleSubmit}
-                        disabled={!canProceed('schedule')}
+                        disabled={!canProceed('schedule') || isLoading}
                         className="whatsapp-green text-white"
                       >
-                        Profili Tamamla
+                        {isLoading ? 'Kaydediliyor...' : 'Profili Tamamla'}
                         <CheckCircle className="w-4 h-4 ml-2" />
                       </Button>
                     </div>

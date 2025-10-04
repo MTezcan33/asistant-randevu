@@ -9,6 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { MessageCircle, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
+import { supabase } from '@/lib/supabase';
 
 const RegisterPage = () => {
   const navigate = useNavigate();
@@ -22,6 +23,7 @@ const RegisterPage = () => {
     acceptTerms: false
   });
   const [isLogin, setIsLogin] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -38,7 +40,7 @@ const RegisterPage = () => {
     }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     
     if (!isLogin && !formData.acceptTerms) {
@@ -50,27 +52,73 @@ const RegisterPage = () => {
       return;
     }
 
-    // Simulate registration/login
-    const userData = {
-      id: Date.now(),
-      firstName: formData.firstName,
-      lastName: formData.lastName,
-      email: formData.email,
-      phone: formData.phone,
-      registeredAt: new Date().toISOString()
-    };
+    setIsLoading(true);
 
-    localStorage.setItem('user', JSON.stringify(userData));
-    
-    toast({
-      title: isLogin ? "Giriş Başarılı!" : "Kayıt Başarılı!",
-      description: isLogin ? "Hoş geldiniz!" : "E-posta onayı gönderildi. Telefon doğrulaması için yönlendiriliyorsunuz."
-    });
+    try {
+      if (isLogin) {
+        // Login işlemi - şimdilik localStorage'dan kontrol
+        const savedUser = localStorage.getItem('user');
+        if (savedUser) {
+          toast({
+            title: "Giriş Başarılı!",
+            description: "Hoş geldiniz!"
+          });
+          navigate('/dashboard');
+        } else {
+          toast({
+            title: "Hata",
+            description: "Kullanıcı bulunamadı.",
+            variant: "destructive"
+          });
+        }
+      } else {
+        // Kayıt işlemi - Supabase'e kaydet
+        const { data: userData, error } = await supabase
+          .from('company_users')
+          .insert([{
+            name: `${formData.firstName} ${formData.lastName}`,
+            email: formData.email,
+            phone: formData.phone,
+            role: 'admin',
+            email_verified: false,
+            phone_verified: false
+          }])
+          .select()
+          .single();
 
-    // Simulate email verification and phone verification
-    setTimeout(() => {
-      navigate('/onboarding');
-    }, 2000);
+        if (error) {
+          console.error('Supabase Error:', error);
+          toast({
+            title: "Hata!",
+            description: `Kayıt başarısız: ${error.message}`,
+            variant: "destructive"
+          });
+          setIsLoading(false);
+          return;
+        }
+
+        // localStorage'a da kaydet
+        localStorage.setItem('user', JSON.stringify(userData));
+        
+        toast({
+          title: "Kayıt Başarılı!",
+          description: "E-posta onayı gönderildi. Telefon doğrulaması için yönlendiriliyorsunuz."
+        });
+
+        setTimeout(() => {
+          navigate('/onboarding');
+        }, 2000);
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      toast({
+        title: "Hata!",
+        description: "Bir hata oluştu, lütfen tekrar deneyin.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -234,9 +282,10 @@ const RegisterPage = () => {
 
                   <Button 
                     type="submit" 
+                    disabled={isLoading}
                     className="w-full whatsapp-green text-white text-lg py-6"
                   >
-                    {isLogin ? 'Giriş Yap' : 'Kayıt Ol'}
+                    {isLoading ? 'İşleniyor...' : (isLogin ? 'Giriş Yap' : 'Kayıt Ol')}
                   </Button>
                 </form>
 
